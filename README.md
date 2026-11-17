@@ -12,13 +12,11 @@
 2. 从“应用程序”启动 App；首次运行时按 macOS 提示批准特权 Helper。
 3. 如需让其余流量经过 Tailscale，在 Tailscale 中先正常配置 Exit Node。
 
-需要 macOS 13 或更高版本。DMG 为 Apple Silicon 与 Intel 提供通用二进制。App 管理本机路由；使用特权 Helper 时会请求 macOS 授权。它不会提供 Tailscale 服务，也不会改变任何第三方服务的账号资格或地区可用性，不能保证账号免于限制。请遵守相关服务的支持地区和使用条款；[Claude 支持地区政策](https://www.anthropic.com/legal/supported-regions)。本项目与 Anthropic、Tailscale 均无隶属关系。
+需要 macOS 13 或更高版本，并已安装 Tailscale。DMG 为 Apple Silicon 与 Intel 通用二进制。路由修改由特权 Helper 执行，首次运行时 macOS 会请求授权。本项目与 Tailscale 无隶属关系。
 
-当前预览 DMG 使用 ad-hoc 签名，尚未经过 Apple 公证。macOS 可能会显示开发者无法验证的提示；如果你不确定来源或不愿运行未公证的软件，请先不要打开。正式面向公众分发需要 Developer ID 签名和 Apple 公证。
+当前 DMG 为 ad-hoc 签名、未经 Apple 公证，首次打开时 macOS 会提示无法验证开发者，可在“系统设置 › 隐私与安全性”中选择仍要打开。
 
-The app manages local routes through a privileged Helper and requires macOS 13 or later. It does not provide Tailscale service, change eligibility for third-party services, or guarantee that an account will avoid restrictions. Use third-party services only in their supported regions and under their terms. This project is not affiliated with Anthropic or Tailscale.
-
-The current preview DMG is ad-hoc signed and has not been notarized by Apple. macOS may show a warning that the developer cannot be verified. If you do not trust the source or are uncomfortable running unnotarized software, do not open it. Public distribution requires Developer ID signing and Apple notarization.
+Requires macOS 13+ and Tailscale. Routes are changed by a privileged Helper that macOS asks you to approve on first launch. The DMG is ad-hoc signed and not notarized, so macOS will warn on first open. Not affiliated with Tailscale.
 
 ## 路由行为 / Routing behavior
 
@@ -53,6 +51,7 @@ flowchart LR
 - **何时生效**：先确认过一次“经 Exit Node 上网正常”才开始保护，之后连续 3 次检查失败（约 15 秒）就触发拦截。没用过 Exit Node，或探测从未成功过，都不会拦截。
 - **拦截什么**：通过 pf 锚点 `com.apple/250.TailscaleRouteKillSwitch` 拦截一切不经过 Tailscale 网卡的流量，包括国内分流、局域网、外接网卡网段和 DNS。只放行 Tailscale 重连所需的连接（各节点端点、DERP 中继、控制服务器），以及 DHCP 和 IPv6 邻居发现。不修改 `/etc/pf.conf`，也不禁用网卡。
 - **何时解除**：Tailscale 恢复且外网探测连续 2 次通过；完全退出 Tailscale App；在 Tailscale 中取消 Exit Node；点击菜单栏的“手动解除断网保护”；退出 tailscale-route、运行 `recover-network.command` 或 `uninstall.sh`；重启 Mac。手动解除或退出 Tailscale 后，需要再次确认 Exit Node 正常，才会重新开始保护。
+- **启动与重启**：拦截状态只保存在内存和 `/var/run`，重启 Mac 后自动清空，开机不会被锁在网络外；“已开启”的设置会保留，Helper 启动后同样要先确认一次 Exit Node 正常才开始保护。若 Helper 在拦截期间崩溃并被系统拉起，会继续拦截。
 - **应急**：Helper 不可用时，`recover-network.command` 会用 `sudo pfctl -a com.apple/250.TailscaleRouteKillSwitch -F all` 清除规则。
 
 ## 永久保护的 IPv4 网段
@@ -61,7 +60,7 @@ flowchart LR
 
 ### Exit Node 端点保护
 
-2026-10-13 新增：分流应用时自动从 `tailscale status --json` 的 `ExitNodeStatus` → peer → `CurAddr` 提取当前 Exit Node 的公网 IPv4 端点（例如 `198.18.45.40`），并做两层处理：
+分流应用时自动从 `tailscale status --json` 的 `ExitNodeStatus` → peer → `CurAddr` 提取当前 Exit Node 的公网 IPv4 端点（例如 `198.18.45.40`），并做两层处理：
 
 1. **清单保护**：端点 `/32` 与私网、CGNAT 同级，从中国清单、固定 IP、手动 IP 和域名 A 记录中扣除（部分重叠 CIDR 自动拆分）；路由协调器还会再次过滤，防止绕过清单生成器的调用方把它加回目标。没有端点保护前，一旦路由查找命中 utun 全局默认，隧道 UDP 可能成环。
 2. **主机路由兜底**：Helper 维护 `端点IP/32 via 当前物理网关` 的精确主机路由（记录在 `managedExitNodeEndpointRoutes`，与分流目标分开归属）。Tailscale 正常靠 socket 绑定物理接口避免回环；这条路由保证即使绑定失效，端点仍可达，且网络切换后随网关更新。纯 DERP 中继（CurAddr 为空）、IPv6 端点和局域网私网端点（同网段直连，无需钉路由）自动跳过。
@@ -72,7 +71,7 @@ flowchart LR
 
 ### 域名解析 DNS 服务器钉住
 
-2026-11-17 新增：临时域名用 `dig @114.114.114.114` / `dig @222.85.85.85` 解析，但 `@服务器` 只决定“问谁”，不决定从哪个网卡发出；启用 Exit Node 时默认路由是 utun，查询会进隧道并超时。旧实现依赖中国清单路由恰好覆盖这两个地址，而首次应用时清单路由尚未下发（域名在建清单阶段就要解析），仅刷新域名的路径也不会碰清单路由。
+临时域名用 `dig @114.114.114.114` / `dig @222.85.85.85` 解析，但 `@服务器` 只决定“问谁”，不决定从哪个网卡发出；启用 Exit Node 时默认路由是 utun，查询会进隧道并超时。旧实现依赖中国清单路由恰好覆盖这两个地址，而首次应用时清单路由尚未下发（域名在建清单阶段就要解析），仅刷新域名的路径也不会碰清单路由。
 
 现在 Helper 在**每次解析前**（应用分流和按需的域名刷新）先为这两个地址维护 `/32 via 当前物理网关` 的精确主机路由，记录在 `managedDNSServerRoutes`，与分流目标和 Exit Node 端点分开归属，写入后立即持久化账本。网关和接口取自当次网络快照，所以从 Wi-Fi 切到外接网卡（或反过来）时，旧网卡上的钉住路由按三元组精确删除，再在新网卡上重建并用 `route get` 验证。删除未确认的旧路由会保留在账本中等待重试。停止分流时精确删除；菜单栏“域名解析 DNS”一行显示当前钉在哪个接口。
 
@@ -115,7 +114,7 @@ flowchart LR
 - “停止分流”“恢复系统默认”和正常退出都只处理 Helper 账本中的本项目路由；
 - IPv4 路由必须匹配目的网段、网关和接口，域名 IPv6 与 Exit Node 端点按各自的精确状态清理；
 - 清理失败时保留失败类别的受管记录，App 显示错误并保持运行，用户可以重试；
-- 当前 Helper 协议版本为 61。App 检测到不同版本时会严格注销旧 Helper，等待服务注销完成，再注册随 App 打包的新 Helper；注销或注册失败不会继续使用旧进程。
+- App 检测到 Helper 协议版本与自身不一致时会严格注销旧 Helper，等待服务注销完成，再注册随 App 打包的新 Helper；注销或注册失败不会继续使用旧进程。
 
 ### 完成后的验证与安装
 
@@ -236,16 +235,6 @@ scripts/uninstall.sh
 如果 `/Applications` 或系统服务目录需要管理员授权，macOS 会在执行相应步骤时提示授权；不要用 `sudo` 启动 App 本身。
 
 安装后 App 使用 `SMAppService` 注册 `com.tailscale-route.helper`。Helper 由 launchd 以 `system/com.tailscale-route.helper` 运行，负责所有需要权限的路由读写；App 与它通过 `/var/run/tailscale-route-helper.sock` 或用户态 socket 通信。卸载默认不删除用户配置和日志。
-
-### 发布公开副本
-
-`docs/`（内部方案与排查记录）、`CLAUDE.md`、`AGENTS.md` 只供本地开发使用。发布前用导出脚本生成一份不含 git 历史的干净副本：
-
-```sh
-scripts/export-public.sh ~/tailscale-route-public
-```
-
-脚本会排除上述文件、构建产物和日志，并扫描导出结果。如果项目根目录有 `.private-patterns`（本地私有关键字清单，每行一个，已被 `.gitignore` 忽略且不会导出），命中任意关键字即报错。用户配置（域名列表、DNS、测试目标等）保存在 `~/Library/Application Support/tailscale-route` 和 `/Library/Application Support/tailscale-route`，不在仓库中。
 
 ### 彻底清理后重新安装
 
