@@ -42,20 +42,20 @@ flowchart LR
 ```mermaid
 stateDiagram-v2
     state "未启用 / Off" as Off
-    state "等待确认 / Waiting" as Wait
-    state "保护中 / Armed" as Armed
-    state "拦截中 / Blocking" as Block
-
+    state "已开启 / Enabled" as On {
+        state "等待确认 / Waiting" as Wait
+        state "保护中 / Armed" as Armed
+        state "拦截中 / Blocking" as Block
+        [*] --> Wait
+        Wait --> Armed: 经 Exit Node 访问外网成功 / probe OK
+        Armed --> Block: 连续 3 次检查失败，约 15 秒 / 3 failed checks
+        Block --> Armed: 连续 2 次检查通过 / 2 passing checks
+        Armed --> Wait: 退出 Tailscale 或取消 Exit Node
+        Block --> Wait: 退出 Tailscale、取消 Exit Node、手动解除、恢复脚本、重启 Mac
+    }
     [*] --> Off
-    Off --> Wait: 在菜单栏开启 / turned on
-    Wait --> Armed: 经 Exit Node 访问外网成功 / probe OK
-    Armed --> Block: 连续 3 次检查失败，约 15 秒 / 3 failed checks
-    Block --> Armed: 连续 2 次检查通过 / 2 passing checks
-    Armed --> Wait: 退出 Tailscale 或取消 Exit Node / Tailscale quit or no Exit Node
-    Block --> Wait: 退出 Tailscale、取消 Exit Node、手动解除、恢复脚本、重启 Mac / released
-    Wait --> Off: 关闭 / turned off
-    Armed --> Off: 关闭 / turned off
-    Block --> Off: 关闭 / turned off
+    Off --> On: 在菜单栏开启 / turn on
+    On --> Off: 关闭 / turn off
 ```
 
 “等待确认”状态下即使网络异常也不拦截；每 5 秒检查一次 Tailscale 进程、连接状态、Exit Node 在线情况，并绑定 Tailscale 网卡向 1.1.1.1 / 8.8.8.8 / 9.9.9.9 的 443 端口做 TCP 探测。退出 tailscale-route 或卸载时会先解除拦截，再停止 Helper。
