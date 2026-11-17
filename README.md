@@ -22,11 +22,43 @@ Requires macOS 13+ and Tailscale. Routes are changed by a privileged Helper that
 
 ```mermaid
 flowchart LR
-    A[macOS 流量 / macOS traffic] --> B{目标 / Destination}
-    B -->|国内 IPv4 与选定域名 / China IPv4 and selected domains| C[本地网络 / Local network]
-    B -->|其余流量，已启用 Exit Node / Other traffic, Exit Node enabled| D[Tailscale Exit Node]
-    B -->|未启用 Exit Node / Exit Node not enabled| E[系统默认路由 / System default route]
+    A["macOS 流量<br/>macOS traffic"] --> K{"断网保护正在拦截？<br/>Kill switch blocking?"}
+
+    K -->|"否 / No"| B{"目标<br/>Destination"}
+    B -->|"私网 RFC1918、外接网卡直连网段<br/>Private ranges, external NIC subnet"| L["本地直连<br/>Local link"]
+    B -->|"国内 IPv4、选定域名 A/AAAA<br/>China IPv4, selected domains"| C["物理网关<br/>Physical gateway"]
+    B -->|"Exit Node 端点、解析用 DNS 服务器<br/>Exit Node endpoint, resolver DNS"| C
+    B -->|"其余流量，已启用 Exit Node<br/>Other traffic, Exit Node on"| D["Tailscale Exit Node"]
+    B -->|"其余流量，未启用 Exit Node<br/>Other traffic, Exit Node off"| E["系统默认路由<br/>System default route"]
+
+    K -->|"是 / Yes"| G{"出口<br/>Egress"}
+    G -->|"Tailscale 网卡<br/>Tailscale interface"| D
+    G -->|"Tailscale 重连、DHCP、IPv6 邻居发现<br/>Tailscale reconnect, DHCP, IPv6 ND"| P["物理网卡（仅放行这些）<br/>Physical NIC, allowlisted only"]
+    G -->|"其余：国内分流、局域网、外接网段、DNS<br/>Everything else incl. split routes, LAN, DNS"| X["丢弃<br/>Dropped"]
 ```
+
+断网保护状态 / Kill switch states:
+
+```mermaid
+stateDiagram-v2
+    state "未启用 / Off" as Off
+    state "等待确认 / Waiting" as Wait
+    state "保护中 / Armed" as Armed
+    state "拦截中 / Blocking" as Block
+
+    [*] --> Off
+    Off --> Wait: 在菜单栏开启 / turned on
+    Wait --> Armed: 经 Exit Node 访问外网成功 / probe OK
+    Armed --> Block: 连续 3 次检查失败，约 15 秒 / 3 failed checks
+    Block --> Armed: 连续 2 次检查通过 / 2 passing checks
+    Armed --> Wait: 退出 Tailscale 或取消 Exit Node / Tailscale quit or no Exit Node
+    Block --> Wait: 退出 Tailscale、取消 Exit Node、手动解除、恢复脚本、重启 Mac / released
+    Wait --> Off: 关闭 / turned off
+    Armed --> Off: 关闭 / turned off
+    Block --> Off: 关闭 / turned off
+```
+
+“等待确认”状态下即使网络异常也不拦截；每 5 秒检查一次 Tailscale 进程、连接状态、Exit Node 在线情况，并绑定 Tailscale 网卡向 1.1.1.1 / 8.8.8.8 / 9.9.9.9 的 443 端口做 TCP 探测。退出 tailscale-route 或卸载时会先解除拦截，再停止 Helper。
 
 指定域名的 A 记录走当前物理 IPv4 网关；AAAA 记录使用精确 IPv6 `/128` 主机路由走物理 IPv6 网关。添加根域名时会同时解析它和对应的 `www` 子域名。域名在 App 启动、增删域名、网络切换或唤醒后刷新，另有每 30 分钟兜底刷新；失败时以 30 秒起、最长 10 分钟退避重试。其余 IPv6 流量按系统默认路由转发；启用 Exit Node 时即经 Tailscale。
 
