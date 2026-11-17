@@ -1,8 +1,8 @@
 # tailscale-route
 
-> macOS 菜单栏 Tailscale 分流工具：指定的国内 IPv4 地址和域名走当前物理网络，其余流量按 macOS 默认路由转发。
+> macOS 菜单栏 Tailscale 分流工具：指定的国内 IPv4 地址和域名走本地网络，其余流量走已启用的 Tailscale Exit Node。
 
-> A macOS menu bar utility for Tailscale split routing. Send selected China IPv4 destinations and domains through the physical gateway while other traffic follows the macOS default route.
+> A macOS menu bar utility for Tailscale split routing. Send selected China IPv4 destinations and domains through the local network while other traffic uses the configured Tailscale Exit Node.
 
 [下载 DMG / Download DMG](https://github.com/I-Seer/tailscale-route/releases) · [MIT License](LICENSE)
 
@@ -25,12 +25,12 @@ The current preview DMG is ad-hoc signed and has not been notarized by Apple. ma
 ```mermaid
 flowchart LR
     A[macOS 流量 / macOS traffic] --> B{目标 / Destination}
-    B -->|国内 IPv4 与选定域名 / China IPv4 and selected domains| C[物理网关 / Physical gateway]
-    B -->|其余流量 / Other traffic| D[系统默认路由 / System default route]
-    D --> E[启用时可经 Tailscale Exit Node / Tailscale Exit Node when enabled]
+    B -->|国内 IPv4 与选定域名 / China IPv4 and selected domains| C[本地网络 / Local network]
+    B -->|其余流量，已启用 Exit Node / Other traffic, Exit Node enabled| D[Tailscale Exit Node]
+    B -->|未启用 Exit Node / Exit Node not enabled| E[系统默认路由 / System default route]
 ```
 
-指定域名的 A 记录走当前物理 IPv4 网关；AAAA 记录使用精确 IPv6 `/128` 主机路由走物理 IPv6 网关。添加根域名时会同时解析它和对应的 `www` 子域名。域名在 App 启动、增删域名、网络切换或唤醒后刷新，另有每 30 分钟兜底刷新；失败时以 30 秒起、最长 10 分钟退避重试。其余 IPv6 流量继续走系统默认路由。
+指定域名的 A 记录走当前物理 IPv4 网关；AAAA 记录使用精确 IPv6 `/128` 主机路由走物理 IPv6 网关。添加根域名时会同时解析它和对应的 `www` 子域名。域名在 App 启动、增删域名、网络切换或唤醒后刷新，另有每 30 分钟兜底刷新；失败时以 30 秒起、最长 10 分钟退避重试。其余 IPv6 流量按系统默认路由转发；启用 Exit Node 时即经 Tailscale。
 
 外接物理网段保护由 Helper 管理完整的直连 CIDR 路由。以 `192.168.32.0/20` 为例，Helper 使用外接接口本机地址（例如 `192.168.32.99`）创建 `/20` 的静态直连接口路由；macOS 路由表中会同时看到原生 `UCSI` 路由和项目管理的 `UCSc` 路由。
 
