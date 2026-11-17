@@ -1,0 +1,7 @@
+.build/
+.swiftpm/
+.DS_Store
+dist/
+.private-patterns
+docs/helper-log.txt
+*.log
