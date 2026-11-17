@@ -1,8 +1,38 @@
 # tailscale-route
 
-面向 macOS 13+ 的 Tailscale 分流菜单栏 App：中国 IPv4 目标和用户临时指定域名的 A 记录走当前物理网关。添加根域名时会同时解析它和对应的 `www` 子域名。AAAA 记录使用精确 IPv6 `/128` 主机路由走物理 IPv6 网关；域名按需重新解析：App 启动、增删域名、网络切换或唤醒后各刷新一次，另外每 30 分钟兜底刷新，失败时以 30 秒起、最长 10 分钟退避重试。其余 IPv6 流量继续走系统默认路由（启用 Exit Node 时即 Tailscale）。
+> macOS 菜单栏 Tailscale 分流工具：指定的国内 IPv4 地址和域名走当前物理网络，其余流量按 macOS 默认路由转发。
 
-外接物理网段保护由 Helper 管理完整的直连 CIDR 路由。以 `192.168.32.0/20` 为例，Helper 使用外接接口本机地址（例如 `192.168.32.99`）创建 `/20` 的静态直连接口路由，而不是只钉住网关 `/32`；macOS 路由表中会同时看到原生 `UCSI` 路由和项目管理的 `UCSc` 路由。
+> A macOS menu bar utility for Tailscale split routing. Send selected China IPv4 destinations and domains through the physical gateway while other traffic follows the macOS default route.
+
+[下载 DMG / Download DMG](https://github.com/I-Seer/tailscale-route/releases) · [MIT License](LICENSE)
+
+## 快速开始 / Quick start
+
+1. 下载最新 DMG，打开后将 `tailscale-route.app` 拖到“应用程序”文件夹。
+2. 从“应用程序”启动 App；首次运行时按 macOS 提示批准特权 Helper。
+3. 如需让其余流量经过 Tailscale，在 Tailscale 中先正常配置 Exit Node。
+
+需要 macOS 13 或更高版本。DMG 为 Apple Silicon 与 Intel 提供通用二进制。App 管理本机路由；使用特权 Helper 时会请求 macOS 授权。它不会提供 Tailscale 服务，也不会改变任何第三方服务的账号资格或地区可用性，不能保证账号免于限制。请遵守相关服务的支持地区和使用条款；[Claude 支持地区政策](https://www.anthropic.com/legal/supported-regions)。本项目与 Anthropic、Tailscale 均无隶属关系。
+
+当前预览 DMG 使用 ad-hoc 签名，尚未经过 Apple 公证。macOS 可能会显示开发者无法验证的提示；如果你不确定来源或不愿运行未公证的软件，请先不要打开。正式面向公众分发需要 Developer ID 签名和 Apple 公证。
+
+The app manages local routes through a privileged Helper and requires macOS 13 or later. It does not provide Tailscale service, change eligibility for third-party services, or guarantee that an account will avoid restrictions. Use third-party services only in their supported regions and under their terms. This project is not affiliated with Anthropic or Tailscale.
+
+The current preview DMG is ad-hoc signed and has not been notarized by Apple. macOS may show a warning that the developer cannot be verified. If you do not trust the source or are uncomfortable running unnotarized software, do not open it. Public distribution requires Developer ID signing and Apple notarization.
+
+## 路由行为 / Routing behavior
+
+```mermaid
+flowchart LR
+    A[macOS 流量 / macOS traffic] --> B{目标 / Destination}
+    B -->|国内 IPv4 与选定域名 / China IPv4 and selected domains| C[物理网关 / Physical gateway]
+    B -->|其余流量 / Other traffic| D[系统默认路由 / System default route]
+    D --> E[启用时可经 Tailscale Exit Node / Tailscale Exit Node when enabled]
+```
+
+指定域名的 A 记录走当前物理 IPv4 网关；AAAA 记录使用精确 IPv6 `/128` 主机路由走物理 IPv6 网关。添加根域名时会同时解析它和对应的 `www` 子域名。域名在 App 启动、增删域名、网络切换或唤醒后刷新，另有每 30 分钟兜底刷新；失败时以 30 秒起、最长 10 分钟退避重试。其余 IPv6 流量继续走系统默认路由。
+
+外接物理网段保护由 Helper 管理完整的直连 CIDR 路由。以 `192.168.32.0/20` 为例，Helper 使用外接接口本机地址（例如 `192.168.32.99`）创建 `/20` 的静态直连接口路由；macOS 路由表中会同时看到原生 `UCSI` 路由和项目管理的 `UCSc` 路由。
 
 ## 停止分流与退出
 
@@ -171,6 +201,18 @@ swift run tailscale-route
 `tailscale-route-cli --live-replace` 会通过已安装 Helper 修改真实系统路由，属于高风险操作；除非明确需要，不要使用该选项。
 
 ## 构建、安装与卸载
+
+生成 Apple Silicon 与 Intel 通用 DMG：
+
+```sh
+scripts/package-dmg.sh
+```
+
+产物为 `dist/tailscale-route-<版本>-universal.dmg`。默认使用 ad-hoc 签名且未公证；准备好 Developer ID 和 `notarytool` 钥匙串配置后，可提供 `CODESIGN_IDENTITY` 与 `NOTARY_PROFILE` 执行正式签名和公证：
+
+```sh
+CODESIGN_IDENTITY="Developer ID Application: ..." NOTARY_PROFILE="notary-profile" scripts/package-dmg.sh
+```
 
 生成经过 ad-hoc 签名的本地 App：
 
